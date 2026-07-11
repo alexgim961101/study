@@ -2,4 +2,6 @@
 
 백엔드 관련 학습 노트. (서버, API, DB, 인증, 트랜잭션 등)
 
-<!-- 노트가 늘어나면 여기에 목차를 추가한다. -->
+## 목차
+
+- [oauth](./oauth.md) — OAuth 2.0 (Authorization Code + PKCE), 위임 인가와 토큰 모델
