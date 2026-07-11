@@ -4,4 +4,6 @@
 
 여러 도메인에 걸치는 풀스택 프로젝트도 여기에 둔다. 배치 규칙은 [../AGENTS.md](../AGENTS.md) 참고.
 
-<!-- 프로젝트가 생기면 여기에 목록을 추가한다. -->
+## 목록
+
+- [counter-app](./counter-app) — React 카운터 앱 (React 19 + TypeScript + Vite)
