@@ -1,135 +1,94 @@
 # OpenID Connect (OIDC)
 
-OAuth 2.0 위에 **"이 사용자가 누구인가(인증, authentication)"** 를 얹은 얇은 신원 레이어. OAuth가 "이 앱이 무엇을 해도 되나(인가)"만 답하고 남긴 빈자리를, **ID 토큰**이라는 검증 가능한 신원 확인서로 메운다.
-관련 노트: [OAuth 2.0 (Authorization Code + PKCE)](./oauth.md) — 이 노트는 그 위에서 이어진다.
+OIDC는 OAuth 2.0 위에 **사용자 인증(authentication)** 을 추가한 표준이다.
 
-## 시나리오
+- OAuth: 이 Client가 어떤 자원에 접근할 수 있는가?
+- OIDC: 인증된 사용자가 누구인가?
 
-- OAuth 노트의 **포토프린팅 ↔ 구글 포토**(데이터 접근)에 더해, 여기선 **"구글로 로그인"** 을 다룬다.
-- **굿커뮤니티**(어떤 사이트)에 "구글로 로그인" 버튼이 있고, 이걸로 가입·로그인한다. 굿커뮤니티가 알고 싶은 건 사진 접근이 아니라 **"지금 로그인하는 이 사람이 누구인가"**.
+예를 들어 “구글로 로그인”에서 굿커뮤니티는 사진 API 권한보다, 로그인한 사용자를 자기 서비스의 어떤 계정과 연결할지 알아야 한다.
 
-## 정리
+## OAuth만으로 로그인하면 안 되는 이유
 
-### 1. 왜 필요한가 — OAuth는 "인가", 로그인은 "인증"
+액세스 토큰은 Resource Server에 자원 접근 권한을 증명하는 토큰이다. Client에게 “이 사용자가 이 로그인 요청으로 인증되었다”라고 전달하는 표준 신원 증명서는 아니다.
 
-두 질문은 완전히 다르다.
+따라서 액세스 토큰으로 프로필 API를 호출해 사용자를 추정하고 로그인시키면, 다른 Client를 대상으로 발급된 토큰을 잘못 받아들이는 **token substitution** 문제가 생길 수 있다.
 
-| | 질문 | 담당 |
-|---|------|------|
-| **인가 (authorization)** | 이 앱이 **무엇을 해도 되나** (내 사진 읽어도 되나) | OAuth |
-| **인증 (authentication)** | 이 사용자가 **누구인가 / 본인 맞나** | **OIDC** |
+OIDC는 이 문제를 해결하기 위해, Client가 직접 검증할 수 있는 ID Token을 추가한다.
 
-OAuth는 이름 그대로 Auth*orization* — 인가 프로토콜이라 "누구인가"엔 원래 답하지 않는다. "구글로 로그인"이 알고 싶은 건 인증이다.
+## 등장인물
 
-> "누구인지"엔 두 겹이 있다 — ⓐ *"이 사람이 누구이고 방금 본인이 로그인했다"* 는 **확인**(핵심), ⓑ 이름·이메일·프사 같은 **프로필**(부가). OIDC의 본체는 ⓐ고, ⓑ는 덤이다(→ 7).
-
-### 2. 순진한 해법의 함정 — 토큰 치환 (token substitution)
-
-"이미 OAuth로 **access token**을 받았으니, 그걸로 구글 프로필 API를 불러 '아 이 사람 X구나' 하고 로그인시키면 되지 않나?" — 예전엔 이렇게 했고, 여기에 구멍이 있다.
-
-- access token은 **제시 대상이 Resource Server**(구글 포토 API)인 출입증이다. Client는 그걸 **들고 다니는 배달부**일 뿐, "너에게 이 사람이 누구다"라고 말해주는 물건이 아니다.
-- 게다가 **bearer(소지자)용** — 이름 대조 없이 **들고 있기만 하면 통한다.**
-- access token에는 *"이 토큰이 **어느 앱에게**, **어떤 로그인**에 대해 발급됐는지"* 가 **검증 가능하게 박혀 있지 않다.**
-
-**공격:** 악성 앱 이블프린트가 (정당하게 받았든 탈취했든) 내 access token을 갖고 있다가, "구글 프로필로 로그인"을 쓰는 **다른 사이트(굿커뮤니티)** 에 그 토큰을 들이민다. 굿커뮤니티는 그 토큰으로 프로필 API를 부르고 → "이 사람은 나(피해자)구나" → **공격자를 피해자로 로그인**시킨다. 계정 도용.
-
-핵심 원인: 받는 쪽이 "이 토큰이 **나를 위한, 이 로그인용**인지" 검증할 수단이 없다.
-
-### 3. 해법: ID 토큰 (ID Token)
-
-OIDC가 추가하는 **세 번째 토큰**. 용도는 오직 하나 — **"이 사용자가 누구다"를 Client에게 증명.**
-
-기존 토큰 표에 열 하나가 붙는다.
-
-| | 액세스 토큰 | 리프레시 토큰 | **ID 토큰** |
-|---|---|---|---|
-| **제시 대상** | Resource Server | Authorization Server | **Client 자신** |
-| **용도** | 데이터 접근 | 새 access token 발급 | **신원 증명(로그인)** |
-| **형식** | JWT / 불투명 | 불투명 | **항상 서명된 JWT** |
-| **누가 검증** | Resource Server | Authorization Server | **Client** |
-| **노출 시점** | 요청마다 | 드묾 | **로그인 때 한 번** |
-
-**이게 인가 토큰과 인증 토큰을 가르는 본질:** access token의 제시 대상은 **문지기(Resource Server)** — "출입증 유효한가"만 본다. ID 토큰의 제시 대상은 **Client 자신** — 구글이 client에게 **직접 써준 "이 사람이 누구다" 확인서**다. 그래서 client가 신원 판단에 써도 되는, 애초에 그 용도로 만든 물건이다.
-
-### 4. ID 토큰 속 표준 클레임
-
-ID 토큰은 JWT라 안을 열어볼 수 있다. Client는 로그인 때 이걸 검사한다.
-
-| 클레임 | 뜻 | Client의 확인 |
-|---|---|---|
-| `iss` | issuer(발급자) | "구글이 발급한 거 맞아?" |
-| `sub` | subject — 사용자 **고유 ID** | **"누구"** (이름 아님, 안 바뀌는 식별자) |
-| `aud` | audience(수신자) | **"나(이 client) 앞으로 온 거 맞아?"** |
-| `exp` / `iat` | 만료 / 발급 시각 | "안 지났어?" |
-| `nonce` | 요청에 묶는 값(→ 5) | "내가 보낸 그 값 맞아?" |
-| *(서명)* | 구글의 서명 | "위조·변조 아냐? 진짜 구글?" |
-
-> **"누구"는 `sub`다.** `aud`는 "누구"가 아니라 "이게 누구 앞으로 온 것인가"(수신자)를 말한다 — 자주 헷갈리는 지점.
-
-### 5. 세 가지 안전장치 (aud / 서명 / nonce)
-
-2번의 공격이 왜 이제 실패하는지 — 세 장치가 각각 **다른 구멍**을 막는다.
-
-| 장치 | 무엇을 막나 |
+| OIDC 용어 | 역할 |
 |---|---|
-| **`aud`** | **다른 앱**으로의 재사용. 이블프린트용 토큰(`aud=이블프린트`)을 굿커뮤니티에 들이밀어도, 굿커뮤니티는 "`aud`가 나인가?"에서 **거부.** |
-| **서명** | **위조·변조.** 공격자가 토큰을 통째로 만들거나 `aud`를 자기 것으로 고치는 걸 막고, **출처가 구글**임을 증명. "API가 응답하네 → 믿자"가 아니라 **토큰 자체를 검증.** |
-| **`nonce`** | **같은 앱 안에서의 재생·주입.** 어떤 경로로 얻은 **id_token**을 공격자가 자기 로그인 흐름에 끼워 넣는 것을 막는다. |
+| End-User | 사용자. OAuth의 Resource Owner에 해당 |
+| Relying Party (RP) | OpenID Provider의 인증 결과에 의존하는 Client |
+| OpenID Provider (OP) | 인증하고 ID Token을 발급하는 Authorization Server |
+| Resource Server | 액세스 토큰으로 보호된 자원을 제공하는 서버 |
 
-**nonce 원리 (= PKCE와 같은 "요청↔세션 묶기"):** client가 로그인 시작 때 랜덤 `nonce`를 만들어 authorization 요청(앞문)에 실어 보냄 → 구글이 그 값을 **id_token 클레임으로 박아** 돌려줌 → client가 "내가 보낸 그 nonce 맞아?" 대조 → 안 맞으면 거부.
+UserInfo endpoint는 액세스 토큰으로 보호되는 Resource Server 역할을 한다.
 
-- **PKCE**는 인가 **코드**를 원래 요청에 묶고, **nonce**는 **id_token**을 원래 로그인 요청에 묶는다. 같은 아이디어, 다른 대상.
-- (id_token이 브라우저 URL로 직접 오던 옛 implicit 흐름에서 특히 필수였다. Authorization Code + PKCE로 뒷문에서 받으면 이미 안전하지만 스펙은 여전히 요구한다.)
+## 기본 흐름: Authorization Code + PKCE + OIDC
 
-### 6. `openid` 스코프 — OIDC를 켜는 스위치
+~~~text
+1. 사용자가 굿커뮤니티(RP)에서 "구글로 로그인"을 선택한다.
+2. RP가 PKCE의 verifier/challenge와 state, nonce를 만들고,
+   scope=openid와 함께 구글(OP)의 인증 화면으로 보낸다.
+3. 사용자는 OP에서 인증하고 권한을 허용한다.
+4. OP는 브라우저를 통해 RP에 authorization code를 보낸다.
+5. RP는 code와 verifier를 token endpoint로 보내 토큰을 교환한다.
+6. OP는 access token과 ID Token을 반환하고,
+   필요하면 refresh token도 반환한다.
+7. RP는 ID Token을 검증한다.
+8. 검증에 성공하면 sub를 기준으로 RP의 사용자 계정과 연결한다.
+9. 프로필 정보가 필요하면 access token으로 UserInfo endpoint를 호출한다.
+~~~
 
-구글은 요청이 순수 OAuth(데이터 접근만)인지 OIDC(로그인)인지 알아야 한다. 그 신호가 **스코프**다.
+OAuth의 Authorization Code + PKCE 흐름에 OIDC가 더하는 핵심은 **scope=openid**, **nonce**, ID Token이다. state와 PKCE의 역할은 OAuth 노트에서 다룬다.
 
-- 요청 scope에 **`openid`** 가 있으면 → 구글은 OIDC로 보고 **id_token을 함께 발급.** 없으면 순수 OAuth(id_token 없음).
-- 이 단어 하나가 **OAuth ↔ OIDC를 가르는 스위치.**
+## ID Token
 
-### 7. 프로필(ⓑ)과 UserInfo — 두 토큰의 공존
+ID Token은 OP가 RP에게 전달하는 **인증 결과**다. API 호출용 토큰이 아니다.
 
-`openid`만 넣으면 받는 최소 신원은 **`sub`(누구)**. 이름·이메일·프사(ⓑ)까지 원하면:
+| | 액세스 토큰 | ID Token |
+|---|---|---|
+| 목적 | Resource Server의 자원 접근 | RP에게 인증 결과 전달 |
+| 제시 대상 | Resource Server | RP |
+| 형식 | 불투명 문자열 또는 JWT 등 | 서명된 JWT. 필요하면 암호화될 수 있음 |
+| 핵심 식별자 | 자원 접근 권한 | sub: Issuer 안에서 사용자를 식별하는 값 |
 
-- `scope`에 `profile`, `email` 등을 **추가로** 요청한다.
-- 프로필은 표준 **UserInfo 엔드포인트**에서 받아오는데, 이때 내미는 건 **access token**이다. (UserInfo도 결국 하나의 API 창구 = Resource Server. access token은 원래 하던 일 그대로.)
+UserInfo 같은 API를 호출할 때는 ID Token이 아니라 access token을 사용한다.
 
-**즉 OIDC는 OAuth를 대체하지 않고 얹는다. 한 번의 로그인 흐름에서 둘 다 나온다:**
+## ID Token 검증
 
-- **id_token** → Client에게, 로그인 순간 한 번: **"누구인가"(인증).**
-- **access token** → Resource Server에게, 이후 계속: **"무엇을 하냐"(인가).**
+RP는 최소한 다음을 확인해야 한다.
 
-### 8. 등장인물 — OAuth 4역할 위에 이름표만
+| 항목 | 확인 내용 |
+|---|---|
+| 서명 | 신뢰한 OP의 키로 서명되었는가? |
+| iss | 내가 사용한 OP와 일치하는가? |
+| aud | 내 client_id가 대상에 포함되어 있는가? |
+| exp | 만료되지 않았는가? |
+| nonce | 요청에 nonce를 보냈다면 응답의 값과 일치하는가? |
 
-| OAuth 역할 | OIDC 이름 |
-|------|-----------|
-| Resource Owner (사용자) | **End-User** |
-| Client (굿커뮤니티) | **Relying Party (RP)** — 신원 확인을 OP에 *의존(rely)* 하는 쪽 |
-| Authorization Server (구글) | **OpenID Provider (OP)** — 신원을 발급·보증하는 쪽 |
-| Resource Server (구글 포토 API) | 그대로 (UserInfo도 일종의 RS) |
+sub가 “누구인지”를 나타낸다. aud는 “누구 앞으로 발급되었는지”를 나타낸다. 사용자 식별자는 보통 iss와 sub를 함께 사용한다.
 
-### 9. 전체 흐름 (OAuth Authorization Code + PKCE + OIDC가 더한 3가지)
+## nonce
 
-OAuth 흐름과 뼈대가 같고, **★ 표시 3곳**만 추가된다.
+RP는 로그인 요청마다 랜덤한 nonce를 만들고 요청에 포함할 수 있다. OP는 이를 ID Token의 nonce 클레임에 넣어 돌려주며, RP는 두 값이 같은지 확인한다.
 
-```
-① 사용자: 굿커뮤니티(RP)에서 "구글로 로그인" 클릭
-② 굿커뮤니티: PKCE verifier/challenge 생성 + nonce 생성
-   → 구글(OP)로 리다이렉트, challenge와 함께
-     ★ scope=openid   ★ nonce   를 실어 보냄                   [앞문]
-③ 구글: challenge와 nonce를 받아둠
-④ 사용자: 구글에서 로그인 + 동의 [허용]              ← 본인 인증은 여기서만
-⑤ 구글 → 브라우저 → 굿커뮤니티: 인가 코드 전달 (토큰 아님)     [앞문]
-⑥ 굿커뮤니티 서버 → 구글 서버: 인가 코드 + verifier            [뒷문]
-   구글: 검증 → access token + refresh token + ★ id_token 발급 [뒷문]
-⑦ 굿커뮤니티: id_token 검증 — 서명·iss·aud·exp·nonce 확인
-   → 통과 시 "이 사용자 = sub" 로 로그인 성립                  (인증 완료)
-⑧ (프로필 필요 시) access token으로 UserInfo 호출 → 이름·이메일·프사 [뒷문]
-```
+nonce는 ID Token을 원래 로그인 요청에 묶는 값이다. Authorization Code Flow에서 PKCE를 사용하면 인가 코드 보호는 PKCE가 담당하지만, nonce를 요청했다면 ID Token에서 반드시 검증해야 한다. nonce는 PKCE나 client authentication을 대체하지 않는다.
 
-**더한 3가지 = ① `scope=openid`  ② `nonce`(요청)  ③ `id_token`(응답).** 나머지는 OAuth 그대로다.
+## openid 스코프와 UserInfo
+
+- scope에 openid를 포함하면 OIDC 요청이 된다.
+- openid만 요청하면 기본적으로 sub를 포함한 인증 결과를 받는다.
+- 이름·이메일·프로필 사진이 필요하면 profile, email 등의 스코프를 추가한다.
+- 프로필 정보는 UserInfo endpoint에서 access token으로 요청한다.
 
 ## 한 줄 요약
 
-OAuth는 "무엇을 해도 되나(인가)"만 답해서, access token으로 로그인을 흉내 내면 **토큰 치환**으로 계정이 털린다. OIDC는 그 위에 **"누구인가(인증)"** 를 얹는데, 그 핵심이 **Client 앞으로(`aud`) 서명되어 발급되는 신원 확인서 = ID 토큰**이다. `sub`가 "누구"를 말하고 **aud·서명·nonce**가 각각 다른앱-재사용·위조·재생을 막으며, 요청에 **`scope=openid`** 를 넣는 순간 OAuth 흐름에 id_token 하나가 더 실려 나온다.
+OAuth가 **자원 접근 권한**을 위임한다면, OIDC는 그 위에 **사용자 인증 결과를 담은 ID Token**을 추가한다. RP는 ID Token의 서명과 iss, aud, exp, nonce를 검증하고 sub로 사용자를 식별한다.
+
+## 공식 문서
+
+- [OpenID Connect Core 1.0](https://openid.net/specs/openid-connect-core-1_0.html)
+- [OpenID Connect Discovery 1.0](https://openid.net/specs/openid-connect-discovery-1_0.html)
